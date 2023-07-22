@@ -291,9 +291,6 @@ type topic struct {
 func OpenTopic(js nats.JetStream, subject string, _ *TopicOptions) (*pubsub.Topic, error) {
 	dt, err := openTopic(js, subject)
 	if err != nil {
-		if errors.Is(err, nats.ErrNoResponders) {
-			return nil, fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
-		}
 		return nil, err
 	}
 	return pubsub.NewTopic(dt, sendJSBatcherOpts), nil
@@ -334,6 +331,9 @@ func (t *topic) SendBatch(ctx context.Context, msgs []*driver.Message) error {
 
 		ack, err := t.js.PublishMsg(nm, nats.Context(ctx))
 		if err != nil {
+			if errors.Is(err, nats.ErrNoResponders) {
+				return fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
+			}
 			return err
 		}
 
@@ -435,9 +435,6 @@ func OpenPullSubscription(nc nats.JetStream, subject, durableName string, opts *
 	opts.DurableName = durableName
 	ds, err := openSubscription(nc, subject, opts)
 	if err != nil {
-		if errors.Is(err, nats.ErrNoResponders) {
-			return nil, fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
-		}
 		return nil, err
 	}
 
@@ -503,6 +500,9 @@ func openSubscription(nc nats.JetStream, subject string, opts *SubscriptionOptio
 		}
 	}
 	if err != nil {
+		if errors.Is(err, nats.ErrNoResponders) {
+			return nil, fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
+		}
 		return nil, err
 	}
 	return s, nil
