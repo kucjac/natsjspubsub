@@ -319,7 +319,7 @@ func TestInteropWithDirectNATS(t *testing.T) {
 	}
 }
 
-func TestErrorCodeJV(t *testing.T) {
+func TestErrorCode(t *testing.T) {
 	ctx := context.Background()
 	dh, err := newHarness(ctx, t)
 	if err != nil {

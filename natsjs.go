@@ -322,7 +322,7 @@ func (t *topic) SendBatch(ctx context.Context, msgs []*driver.Message) error {
 			return err
 		}
 
-		nm := encodeJSMessage(t.subj, m)
+		nm := encodeMessage(t.subj, m)
 		if m.BeforeSend != nil {
 			if err := m.BeforeSend(messageAsFunc(nm)); err != nil {
 				return err
@@ -390,6 +390,11 @@ func (*topic) ErrorCode(err error) gcerrors.ErrorCode {
 	case nats.ErrMaxPayload, nats.ErrReconnectBufExceeded:
 		return gcerrors.ResourceExhausted
 	}
+
+	if errors.Is(err, nats.ErrNoResponders) {
+		return gcerrors.FailedPrecondition
+	}
+
 	return gcerrors.Unknown
 }
 
@@ -592,8 +597,7 @@ func (*subscription) ErrorCode(err error) gcerrors.ErrorCode {
 		return gcerrors.Canceled
 	case errNotInitialized, nats.ErrBadSubscription:
 		return gcerrors.NotFound
-	case nats.ErrBadSubject, nats.ErrTypeSubscription, nats.ErrHeadersNotSupported,
-		nats.ErrJetStreamNotEnabled, nats.ErrBadHeaderMsg:
+	case nats.ErrBadSubject, nats.ErrTypeSubscription, nats.ErrHeadersNotSupported, nats.ErrBadHeaderMsg:
 		return gcerrors.FailedPrecondition
 	case nats.ErrAuthorization:
 		return gcerrors.PermissionDenied
@@ -602,6 +606,10 @@ func (*subscription) ErrorCode(err error) gcerrors.ErrorCode {
 	case nats.ErrTimeout:
 		return gcerrors.DeadlineExceeded
 	}
+	if errors.Is(err, nats.ErrNoResponders) {
+		return gcerrors.FailedPrecondition
+	}
+
 	return gcerrors.Unknown
 }
 
@@ -618,7 +626,7 @@ func (s *subscription) decode(msg *nats.Msg) (*driver.Message, error) {
 	if msg == nil {
 		return nil, nats.ErrInvalidMsg
 	}
-	dm, err := decodeJSMessage(msg)
+	dm, err := decodeMessage(msg)
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +690,7 @@ func (s *subscription) receiveBatchPush(ctx context.Context, _ int) ([]*driver.M
 	return []*driver.Message{dm}, nil
 }
 
-func encodeJSMessage(sub string, m *driver.Message) *nats.Msg {
+func encodeMessage(sub string, m *driver.Message) *nats.Msg {
 	var header nats.Header
 	if m.Metadata != nil {
 		header = nats.Header{}
@@ -699,7 +707,7 @@ func encodeJSMessage(sub string, m *driver.Message) *nats.Msg {
 }
 
 // Convert NATS JetStream msgs to *driver.Message.
-func decodeJSMessage(msg *nats.Msg) (*driver.Message, error) {
+func decodeMessage(msg *nats.Msg) (*driver.Message, error) {
 	if msg == nil {
 		return nil, nats.ErrInvalidMsg
 	}
@@ -713,7 +721,7 @@ func decodeJSMessage(msg *nats.Msg) (*driver.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	dm.LoggableID = strconv.FormatUint(meta.Sequence.Stream, 16)
+	dm.LoggableID = fmt.Sprintf("%d:%d", meta.Sequence.Stream, meta.Sequence.Consumer)
 
 	if msg.Header != nil {
 		dm.Metadata = map[string]string{}
