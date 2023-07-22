@@ -71,6 +71,17 @@ func (o *defaultUrlOpener) defaultOpener() (*URLOpener, error) {
 		if err != nil {
 			o.err = fmt.Errorf("failed to establish JetStream connection: %v", err)
 		}
+
+		// Ensure that the jetstream is enabled for the account or server.
+		_, err = js.AccountInfo()
+		if err != nil {
+			switch {
+			case errors.Is(err, nats.ErrJetStreamNotEnabled):
+				o.err = errors.New("natsjspubsub: jet stream not enabled on server")
+			case errors.Is(err, nats.ErrJetStreamNotEnabledForAccount):
+				o.err = errors.New("natsjspubsub: jet stream not enabled for account")
+			}
+		}
 		o.opener = &URLOpener{JetStream: js}
 	})
 	return o.opener, o.err
@@ -94,7 +105,7 @@ func (o *defaultUrlOpener) OpenSubscriptionURL(ctx context.Context, u *url.URL) 
 	return opener.OpenSubscriptionURL(ctx, u)
 }
 
-// Scheme is the URL scheme natspubsub registers its URLOpeners under on pubsub.DefaultMux.
+// Scheme is the URL scheme natsjspubsub registers its URLOpeners under on pubsub.DefaultMux.
 const Scheme = "natsjs"
 
 // URLOpener opens NATS URLs like "natsjs://mysubject".
@@ -280,6 +291,9 @@ type topic struct {
 func OpenTopic(js nats.JetStream, subject string, _ *TopicOptions) (*pubsub.Topic, error) {
 	dt, err := openTopic(js, subject)
 	if err != nil {
+		if errors.Is(err, nats.ErrNoResponders) {
+			return nil, fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
+		}
 		return nil, err
 	}
 	return pubsub.NewTopic(dt, sendJSBatcherOpts), nil
@@ -289,12 +303,12 @@ func OpenTopic(js nats.JetStream, subject string, _ *TopicOptions) (*pubsub.Topi
 // harness can get the driver interface implementation if it needs to.
 func openTopic(nc nats.JetStream, subject string) (driver.Topic, error) {
 	if nc == nil {
-		return nil, errors.New("natspubsub: nats.JetStreamContext is required")
+		return nil, errors.New("natsjspubsub: nats.JetStreamContext is required")
 	}
 	return &topic{js: nc, subj: subject}, nil
 }
 
-var errNotInitialized = errors.New("natspubsubjs: topic not initialized")
+var errNotInitialized = errors.New("natsjspubsub: topic not initialized")
 
 // SendBatch implements driver.Topic.SendBatch.
 func (t *topic) SendBatch(ctx context.Context, msgs []*driver.Message) error {
@@ -303,7 +317,7 @@ func (t *topic) SendBatch(ctx context.Context, msgs []*driver.Message) error {
 	}
 
 	if t.isClosed.Load() {
-		return errors.New("natspubsub: topic is closed")
+		return errors.New("natsjspubsub: topic is closed")
 	}
 
 	for _, m := range msgs {
@@ -386,7 +400,7 @@ func (t *topic) Close() error {
 	}
 
 	if !t.isClosed.CompareAndSwap(false, true) {
-		return errors.New("natspubsub: topic already closed")
+		return errors.New("natsjspubsub: topic already closed")
 	}
 
 	return nil
@@ -421,6 +435,9 @@ func OpenPullSubscription(nc nats.JetStream, subject, durableName string, opts *
 	opts.DurableName = durableName
 	ds, err := openSubscription(nc, subject, opts)
 	if err != nil {
+		if errors.Is(err, nats.ErrNoResponders) {
+			return nil, fmt.Errorf("natsjspubsub: jet stream not enabled on server or account: %w", err)
+		}
 		return nil, err
 	}
 
